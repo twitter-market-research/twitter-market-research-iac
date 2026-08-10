@@ -1,2 +1,9 @@
 
 .env
+
+#  ---- Terraform files ----
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
