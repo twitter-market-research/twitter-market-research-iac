@@ -4,7 +4,7 @@ resource "google_secret_manager_secret" "x_bearer_token" {
     replication {
         user_managed {
             replicas {
-                locations = var.region
+                location = var.region
             }
         }
     }
