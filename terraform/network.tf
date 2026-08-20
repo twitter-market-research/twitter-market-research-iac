@@ -6,7 +6,11 @@ resource "google_project_service" "required" {
   for_each = toset([
     "compute.googleapis.com",
     "iap.googleapis.com",
+    "secretmanager.googleapis.com",
+    "storage.googleapis.com",
+    "bigquery.googleapis.com",
   ])
+
 
   service = each.value
 

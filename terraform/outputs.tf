@@ -1,6 +1,6 @@
 
 
-output "twitter-market-vm" {
+output "vm_name" {
   description = "Twitter market research project's VM"
   value       = google_compute_instance.dwh.name
 }

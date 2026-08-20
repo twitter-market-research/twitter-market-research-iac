@@ -1,6 +1,6 @@
 # ---------- Raw data layer ----------
 resource "google_storage_bucket" "tweets_raw" {
-  name     = "${var.project_id}-tweets_raw"
+  name     = "${var.project_id}-tweets-raw"
   location = var.region
 
   storage_class               = "STANDARD"
@@ -37,11 +37,11 @@ resource "google_storage_bucket" "tweets_enriched" {
   }
 }
 
-# ---------- Entrepôt ----------
+# ---------- Warehouse ----------
 resource "google_bigquery_dataset" "tweets" {
   dataset_id  = "tweets"
   location    = var.region
-  description = "Tweets Ligue 1 collectés via l'API X"
+  description = "Tweets Ligue 1 collected from X API"
 
   labels = {
     project = "twitter-market-research"

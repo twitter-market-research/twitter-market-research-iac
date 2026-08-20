@@ -3,7 +3,7 @@ resource "google_compute_instance" "dwh" {
   machine_type = var.machine_type
   zone         = var.zone
 
-  # Make sure wirefall rule will be applied to the VM
+  # Make sure firewall rule will be applied to the VM
   tags = ["ssh-iap"]
 
   boot_disk {
