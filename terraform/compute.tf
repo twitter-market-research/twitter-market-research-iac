@@ -1,10 +1,31 @@
-resource "google_compute_instance" "dwh" {
-  name         = "twitter-mr-dwh"
-  machine_type = var.machine_type
-  zone         = var.zone
+locals {
+  dwh_nodes = {
+    "1" = {
+      zone         = "europe-west1-b"
+      machine_type = "e2-standard-2" # also hosts monitoring, collector and Spark
+    }
+    "2" = {
+      zone         = "europe-west1-c"
+      machine_type = "e2-medium"
+    }
+    "3" = {
+      zone         = "europe-west1-d"
+      machine_type = "e2-medium"
+    }
+  }
+}
 
-  # Make sure firewall rule will be applied to the VM
-  tags = ["ssh-iap"]
+# configurate resources for each VM's instance
+resource "google_compute_instance" "dwh" {
+  for_each = local.dwh_nodes
+
+  name         = "twitter-mr-dwh-${each.key}"
+  machine_type = each.value.machine_type
+  zone         = each.value.zone
+
+  # ssh-iap  : reachable through the IAP tunnel
+  # dwh-node : cluster member, allowed to talk to other members
+  tags = ["ssh-iap", "dwh-node"]
 
   boot_disk {
     initialize_params {
@@ -33,11 +54,14 @@ resource "google_compute_instance" "dwh" {
     enable_integrity_monitoring = true
   }
 
+  # Daily start/stop window.
+  resource_policies = [google_compute_resource_policy.dwh_schedule.self_link]
+
   labels = {
     project = "twitter-market-research"
     role    = "dwh"
+    node    = each.key
   }
 
-  # Allow terraform to stop VM's instance for change the type
   allow_stopping_for_update = true
 }
