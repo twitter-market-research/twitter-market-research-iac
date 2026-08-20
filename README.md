@@ -124,6 +124,7 @@ ansible/                VM configuration              [planned]
 | **Secret kept out of the state** | The Terraform state stores everything it manages in plain text. |
 | **`europe-west1` everywhere** | GDPR consistency, and BigQuery can only load from a colocated bucket. |
 | **Versioning on the state bucket** | The state is the only map linking the code to the real infrastructure. Losing it means losing control of the platform. |
+| **BigQuery as the serving layer** | The four project KPIs are plain SQL aggregations (`GROUP BY` / `COUNT` / `AVG`). At ~10k tweets/month the volume sits several orders of magnitude below BigQuery's free tier, and it consumes no RAM on the VM. MinIO remains the raw layer, MongoDB the application store. |
 
 ## Accessing the VM
 
