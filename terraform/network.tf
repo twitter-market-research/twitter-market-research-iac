@@ -51,7 +51,7 @@ resource "google_compute_router_nat" "main" {
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
-# -------------- Firewall -------------
+# -------------- Firewalls -------------
 resource "google_compute_firewall" "allow_iap_ssh" {
   name        = "allow-sh-from-iap"
   network     = google_compute_network.main.name
@@ -65,6 +65,30 @@ resource "google_compute_firewall" "allow_iap_ssh" {
   source_ranges = ["35.235.240.0/20"]
   target_tags   = ["ssh-iap"]
 }
+
+resource "google_compute_firewall" "allow_internal_cluster" {
+  name        = "allow-internal-cluster"
+  network     = google_compute_network.main.name
+  description = "Kafka, ZooKeeper and metrics traffic between DWH nodes"
+
+  allow {
+    protocol = "tcp"
+    ports = [
+      "2181", # ZooKeeper client
+      "2888", # ZooKeeper peer
+      "3888", # ZooKeeper leader election
+      "9092", # Kafka broker
+      "9093", # Kafka inter-broker
+      "9100", # node_exporter
+      "7071", # JMX exporter
+    ]
+  }
+
+  # Only machines tagged dwh-node may reach machines tagged dwh-node.
+  source_tags = ["dwh-node"]
+  target_tags = ["dwh-node"]
+}
+
 
 
 
