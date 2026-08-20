@@ -4,11 +4,11 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "Location of the buckets"
+  description = "Location of the secret replica"
   type        = string
 }
 
 variable "environment" {
-  description = "Environment name, appended to every bucket name"
+  description = "Environment name, appended to the secret id"
   type        = string
 }

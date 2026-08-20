@@ -1,2 +1,1 @@
-
 project_id = "twitter-market-research"
