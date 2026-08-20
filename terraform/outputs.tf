@@ -1,14 +1,20 @@
 
 
-output "vm_name" {
-  description = "Twitter market research project's VM"
-  value       = google_compute_instance.dwh.name
+output "dwh_node_ips" {
+  description = "DWH cluster nodes: name => internal IP"
+  value = {
+    for k, vm in google_compute_instance.dwh : vm.name => vm.network_interface[0].network_ip
+  }
 }
 
-output "vm_internal_ip" {
-  description = "Private IP of VM's instance"
-  value       = google_compute_instance.dwh.network_interface[0].network_ip
+output "dwh_node_fqdns" {
+  description = "Internal DNS names, used for Kafka advertised.listeners and the ZooKeeper quorum"
+  value = {
+    for k, vm in google_compute_instance.dwh :
+    vm.name => "${vm.name}.${vm.zone}.c.${var.project_id}.internal"
+  }
 }
+
 
 output "dwh_service_account" {
   description = "Acount service of the VM instance"
