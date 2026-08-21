@@ -1,0 +1,31 @@
+- name: Configure the bastion host
+  hosts: bastion
+  become: true
+
+  tasks:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name: [apt-transport-https, ca-certificates, gnupg, curl]
+        state: present
+        update_cache: true
+
+    - name: Add the Google Cloud apt key
+      ansible.builtin.get_url:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        dest: /usr/share/keyrings/cloud.google.asc
+        mode: "0644"
+
+    - name: Add the Google Cloud repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/cloud.google.asc] https://packages.cloud.google.com/apt cloud-sdk main"
+        filename: google-cloud-sdk
+        state: present
+
+    - name: Install the cluster tooling
+      ansible.builtin.apt:
+        name:
+          - google-cloud-cli
+          - google-cloud-cli-gke-gcloud-auth-plugin
+          - kubectl
+        state: present
+        update_cache: true

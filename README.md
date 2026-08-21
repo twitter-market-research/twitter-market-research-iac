@@ -1,7 +1,8 @@
 # twitter-market-research-iac
 
-Infrastructure-as-Code for the **Twitter Market Research** platform: provisioning,
-configuration and deployment of the Ligue 1 data platform on Google Cloud.
+Infrastructure-as-Code for the **Twitter Market Research** platform: the GCP landing
+zone, a private GKE cluster and the data stores backing the Ligue 1 tweet analysis
+pipeline.
 
 ## Role in the architecture
 
@@ -9,39 +10,70 @@ The project is split across three repositories with distinct lifecycles:
 
 | Repository | Responsibility |
 |---|---|
-| [`twitter-market-research-dwh`](https://github.com/twitter-market-research/twitter-market-research-dwh) | Data platform: ingestion, storage, processing, monitoring |
-| **`twitter-market-research-iac`** *(this repository)* | Infrastructure: network, VM, identities, secrets, storage |
+| [`twitter-market-research-dwh`](https://github.com/twitter-market-research/twitter-market-research-dwh) | Data platform: ingestion, processing, monitoring |
+| **`twitter-market-research-iac`** *(this repository)* | Infrastructure: network, GKE, identities, secrets, storage |
 | `twitter-market-research-dashboards` | Business dashboards |
 
-**Boundary with the `dwh` repository**: this repository provides the *machine* and the
-*runtime environment*. The `docker-compose.yml` describing the containers belongs to the
-`dwh` repository and is never copied here — Ansible pulls it from its source.
+**Compose for local development, Kubernetes for production.** The `docker-compose.yml`
+in the `dwh` repository stays the way a developer runs the whole stack on a laptop.
+Production runs the same container images on GKE, described by Kubernetes manifests.
+
+> **Known debt** — the stack is described twice: once as Compose, once as manifests.
+> Any change to images, ports or configuration must be applied to both, or the two
+> descriptions drift and bugs stop reproducing locally.
 
 ## Provisioned architecture
 
 ```mermaid
 flowchart TB
-    subgraph vpc["VPC twitter-mr-vpc (europe-west1)"]
-        subgraph subnet["Subnet 10.10.0.0/24"]
-            vm["VM twitter-mr-dwh<br/>e2-standard-2 · no public IP<br/>Kafka ×3 · ZooKeeper · MinIO<br/>Prometheus · AlertManager"]
+    subgraph vpc["VPC twitter-mr-vpc · europe-west1"]
+        subgraph gke["GKE twitter-mr-dwh · regional · private"]
+            prodpool["node pool prod<br/>3 nodes · 3 zones · tainted<br/>namespace prod"]
+            stgpool["node pool staging<br/>1 node · 1 zone<br/>namespace staging"]
         end
-        nat["Cloud NAT<br/>outbound traffic only"]
+        bastion["bastion<br/>e2-micro · no public IP"]
+        nat["Cloud NAT<br/>egress only"]
     end
 
-    dev["Developer workstation"] -->|SSH over IAP| vm
-    vm --> nat --> x["X API v2"]
-    vm --> sm["Secret Manager<br/>x-api-bearer-token"]
-    vm --> gcs["GCS<br/>tweets-raw · tweets-enriched"]
-    gcs --> bq["BigQuery<br/>tweets dataset"]
+    dev["Workstation"] -->|SSH over IAP| bastion
+    bastion -->|kubectl · private endpoint| gke
+    gke --> nat --> x["X API v2"]
+    gke --> sm["Secret Manager<br/>x-api-bearer-token per env"]
+    gke --> gcs["GCS<br/>tweets-raw · tweets-enriched<br/>per environment"]
+    gcs --> bq["BigQuery<br/>tweets_prod"]
     bq --> dash["dashboards repository"]
 ```
 
+## Terraform layout
+
+Three root modules, three independent states, three lifecycles:
+
+| Root | Backend prefix | Contains | Changes |
+|---|---|---|---|
+| `envs/platform` | `platform` | APIs, VPC, subnet, NAT, firewall, GKE cluster, node service account | Rarely. Breaks everyone when it does. |
+| `envs/prod` | `prod` | Production buckets, BigQuery dataset, secret | Often. Affects production only. |
+| `envs/staging` | `staging` | Staging buckets, secret | Often. Affects nothing else. |
+
+`prod` and `staging` read `platform` through a `terraform_remote_state` data source —
+read-only by construction, they cannot modify shared infrastructure.
+
+## Environments and isolation
+
+Staging and production share **one cluster** and are separated by namespaces. That is a
+deliberate cost trade-off, and it means the blast radius is shared. Three mechanisms
+carry the isolation:
+
+| Mechanism | Purpose |
+|---|---|
+| `ResourceQuota` / `LimitRange` per namespace | Staging cannot starve the cluster |
+| Node pool `taint` on prod | Staging workloads cannot be scheduled on production nodes |
+| `NetworkPolicy`, default deny | Kubernetes allows all pod-to-pod traffic by default, the opposite of the VPC |
+
 ## Requirements
 
-- A **Linux** environment (WSL2 works) — Ansible is not supported as a control node
-  on Windows.
-- `gcloud` CLI, `terraform` (~> 1.9), `ansible`
-- A GCP project with billing enabled
+- A **Linux** environment (WSL2 works)
+- `gcloud` CLI, `terraform` (~> 1.9), `kubectl`, `helm`, `ansible`
+- A GCP project with billing enabled and a raised `SSD_TOTAL_GB` quota in `europe-west1`
 - An X API v2 Bearer token (Basic tier)
 
 ## Getting started
@@ -54,12 +86,11 @@ gcloud auth application-default login    # for Terraform (ADC)
 ```
 
 Both are required: the first authenticates `gcloud`, the second creates the
-*Application Default Credentials* that client libraries — including Terraform —
-look for.
+*Application Default Credentials* that client libraries, including Terraform, read.
 
 ### 2. Backend bootstrap
 
-The bucket hosting the Terraform state must exist **before** Terraform runs. It is the
+The bucket holding the Terraform state must exist **before** Terraform runs. It is the
 only resource in the whole project created outside of IaC.
 
 ```bash
@@ -72,12 +103,15 @@ The script is idempotent and safe to re-run.
 
 ### 3. Provisioning
 
+Order matters: `prod` and `staging` read the state of `platform`.
+
 ```bash
-cd terraform
-terraform init
-terraform plan -out=tfplan     # READ the plan in full
-terraform apply tfplan
+for e in platform prod staging; do
+  (cd terraform/envs/$e && terraform init && terraform plan -out=tfplan && terraform apply tfplan)
+done
 ```
+
+Creating a regional cluster takes 5 to 10 minutes.
 
 ### 4. Storing the secret
 
@@ -86,88 +120,155 @@ ends up in plain text in the state file.
 
 ```bash
 printf '%s' "$X_BEARER_TOKEN" | \
-  gcloud secrets versions add x-api-bearer-token --data-file=-
+  gcloud secrets versions add x-api-bearer-token-prod --data-file=-
 ```
 
 Use `printf '%s'` rather than `echo`: the latter appends a newline that would become
 part of the secret.
 
+## Accessing the cluster
+
+The control plane has **no public endpoint**. Every `kubectl` call goes through the
+bastion.
+
+```bash
+gcloud compute ssh twitter-mr-bastion --zone=europe-west1-b --tunnel-through-iap
+
+# then, on the bastion, authenticated as yourself:
+gcloud auth login
+gcloud container clusters get-credentials twitter-mr-dwh --region=europe-west1
+kubectl get nodes
+```
+
+**The bastion is a network hop, not an identity.** Its service account deliberately holds
+no cluster permission. Each person authenticates with their own account, so the role
+matrix below still applies once connected. Granting the bastion cluster permissions would
+collapse the whole model into "whoever can SSH can do anything".
+
+Required IAM roles to reach it: `roles/compute.osLogin` and
+`roles/iap.tunnelResourceAccessor`.
+
+## Human roles
+
+Roles are granted to **Google Groups**, never to individuals — joining or leaving a team
+must not require a `terraform apply`.
+
+| | Data Engineer | Data Analyst | Data Scientist |
+|---|---|---|---|
+| BigQuery prod | `dataEditor` on `tweets_prod` | `dataViewer` on exposed **views** only | `dataViewer` |
+| Sandbox dataset | — | `dataEditor` on `sandbox_analyst` | `dataEditor` on `sandbox_ds` |
+| Query execution | `bigquery.jobUser` | `bigquery.jobUser` | `bigquery.jobUser` |
+| GCS `tweets-raw` | `objectAdmin` | — | `objectViewer` |
+| GKE prod | `container.viewer` + RBAC `view` | — | — |
+| GKE staging | `container.developer` + RBAC `edit` | — | — |
+| Secret Manager | — | — | — |
+| Infrastructure | — | — | — |
+
+Two lines deserve attention. **Nobody reads Secret Manager** — the token is read by the
+pod through Workload Identity; a human who sees it triggers a rotation. And **nobody
+changes infrastructure**: the only identity allowed to run `terraform apply` on
+production is the CI, authenticated through Workload Identity Federation. Humans do not
+mutate production; pipelines do.
+
 ## Repository layout
 
 ```
 bash/
-  create_bucket.sh      State bucket bootstrap (outside Terraform)
+  create_bucket.sh          State bucket bootstrap (outside Terraform)
+ansible/
+  bastion.yml               Installs gcloud, kubectl and helm on the bastion
+  inventory.ini             Reaches the bastion through an IAP ProxyCommand
 terraform/
-  backend.tf            GCS backend (remote state, locked, versioned)
-  providers.tf          Terraform and google provider version constraints
-  variables.tf          Input variables
-  terraform.tfvars      Production environment values (no secrets)
-  network.tf            VPC, subnet, Cloud NAT, IAP firewall rule
-  services.tf           GCP API enablement            [planned]
-  storage.tf            GCS buckets and BigQuery dataset  [planned]
-  iam.tf                VM service account            [planned]
-  secrets.tf            Secret Manager container      [planned]
-  compute.tf            DWH virtual machine           [planned]
-  outputs.tf            Contract exposed to other repositories  [planned]
-ansible/                VM configuration              [planned]
+  modules/
+    network/                VPC, subnet, secondary ranges, NAT, IAP firewall
+    gke/                    Regional private cluster and its node pools
+    storage/                GCS buckets, one set per environment
+    warehouse/              BigQuery dataset
+    secrets/                Secret Manager container
+    iam-roles/              Node service account, human group bindings
+    iam-workloads/          Workload Identity bindings           [planned]
+    bastion/                Bastion host                         [planned]
+  envs/
+    platform/  prod/  staging/
 ```
+
+Ansible has a single job here: preparing the bastion. GKE nodes are managed by Google,
+run a hardened image and are replaced rather than configured — there is no host to
+provision.
 
 ## Architecture decisions
 
 | Decision | Rationale |
 |---|---|
-| **Dedicated VPC, `default` VPC deleted** | The default VPC opens ports 22 and 3389 to `0.0.0.0/0` across 44 regions. A VM created by mistake would be publicly exposed. |
-| **No public IP on the VM** | A public IP is continuously scanned. Outbound traffic goes through Cloud NAT: egress allowed, ingress impossible. |
-| **SSH over IAP only** | Access depends on an IAM role and is revoked without touching the firewall. No port is open to the internet. |
-| **Dedicated service account** | The default Compute service account carries the `Editor` role on the entire project. A flaw in any container would compromise everything. |
-| **Permissions bound to resources** | Roles are attached to each bucket / secret / dataset rather than to the project, so the VM cannot reach the state bucket. |
+| **Three repositories** | Platform, infrastructure and dashboards change for different reasons and at different rhythms. |
+| **Three Terraform states** | Same reasoning one level down. `platform` rarely changes and breaks everyone; environments change constantly and in isolation. |
+| **Compose in dev, Kubernetes in prod** | Production needs rolling node upgrades, TLS with certificate rotation and automatic recovery. Strimzi provides all three; reproducing them on VMs is weeks of fragile work. |
+| **Regional GKE cluster** | A zonal control plane is a single point of failure. Nodes spread across three zones give Kafka real redundancy. |
+| **Private nodes and private control plane** | Nothing in the platform is reachable from the internet. Access goes through IAP and the bastion. |
+| **Bastion carries no permission** | It provides the route; IAM provides the rights. Merging the two would void the role matrix. |
+| **Separate node and workload service accounts** | The node identity only runs the cluster. Workloads borrow their own identity through Workload Identity, with no key file anywhere. |
+| **Dataplane V2** | Enables native `NetworkPolicy`, without which staging pods could reach production Kafka. |
+| **`max_surge = 1`, `max_unavailable = 0`** | A node upgrade adds a node before removing one, so an upgrade never breaks the ZooKeeper quorum. This is what makes `auto_upgrade` acceptable. |
+| **No load balancer in front of Kafka** | Clients bootstrap against any broker, then talk directly to each partition leader. Fault tolerance lives in `bootstrap.servers`, not in a network appliance. |
+| **BigQuery in production only** | The four project KPIs are plain SQL aggregations. At this volume the cost is negligible, but a staging warehouse buys nothing. |
 | **Secret kept out of the state** | The Terraform state stores everything it manages in plain text. |
 | **`europe-west1` everywhere** | GDPR consistency, and BigQuery can only load from a colocated bucket. |
-| **Versioning on the state bucket** | The state is the only map linking the code to the real infrastructure. Losing it means losing control of the platform. |
-| **BigQuery as the serving layer** | The four project KPIs are plain SQL aggregations (`GROUP BY` / `COUNT` / `AVG`). At ~10k tweets/month the volume sits several orders of magnitude below BigQuery's free tier, and it consumes no RAM on the VM. MinIO remains the raw layer, MongoDB the application store. |
+| **Versioning on the state bucket** | The state is the only map linking the code to the real infrastructure. |
+| **Quotas treated as infrastructure** | `SSD_TOTAL_GB` blocked the first cluster creation. Quotas appear in no plan and fail at the worst moment; they are checked and raised before deploying. |
 
-## Accessing the VM
+## Operating window
 
-```bash
-gcloud compute ssh twitter-mr-dwh --zone=europe-west1-b --tunnel-through-iap
-```
+The cluster runs **12:00 to 23:30 Europe/Paris, every day** — a window covering Ligue 1
+kick-offs (Friday evening, Saturday and Sunday afternoons) and working sessions. Outside
+it, node pools are scaled to zero: pods become `Pending`, `PersistentVolumeClaim`s
+survive untouched, and everything resumes on the next start.
 
-Required IAM roles: `roles/compute.osLogin` and `roles/iap.tunnelResourceAccessor`.
+A weekday-only schedule would miss every match, which is where the signal is.
 
-Service web interfaces are not exposed; reach them through a tunnel:
-
-```bash
-# Kafka UI at http://localhost:8080
-gcloud compute start-iap-tunnel twitter-mr-dwh 8080 \
-  --local-host-port=localhost:8080 --zone=europe-west1-b
-```
+`node_count` carries `ignore_changes` so the scheduled resize is not reverted by the next
+`terraform apply`.
 
 ## Contract exposed to other repositories
 
-`terraform output` publishes the values consumed downstream:
-
 | Output | Consumer |
 |---|---|
-| `vm_name`, `vm_internal_ip` | Ansible inventory |
-| `dwh_service_account` | `dwh` application configuration |
-| `bucket_tweets_raw`, `bucket_tweets_enriched` | `dwh` pipelines |
-| `bigquery_dataset` | `dashboards` repository |
+| `cluster_name`, `cluster_location` | Deployment pipelines |
+| `bucket_names` | `dwh` pipelines |
+| `dataset_id` | `dashboards` repository |
+| `secret_id` | Workload Identity bindings |
+
+Dashboards consume **versioned views**, never physical tables, so the underlying schema
+can change without breaking downstream consumers.
 
 ## Estimated costs
 
 | Resource | Order of magnitude |
 |---|---|
-| `e2-standard-2` VM (2 vCPU, 8 GB), running continuously | ~€50/month |
-| 50 GB `pd-balanced` disk | ~€5/month |
-| Cloud NAT | ~€3/month |
-| GCS + BigQuery (very low volumes) | negligible |
+| GKE regional cluster management | check current GKE pricing |
+| 3 production nodes `e2-standard-2` | ~150 €/month at full time |
+| 1 staging node | ~50 €/month at full time |
+| Node and PVC disks (~195 GB) | ~20 €/month |
+| Cloud NAT and bastion | ~10 €/month |
 
-A **stopped VM is not billed** (only its disk is). A budget alert should be configured
-on the billing account before leaving the VM running unattended.
+The daily window bills roughly 48 % of the time. A budget alert should be configured on
+the billing account.
+
+## Status
+
+| Done | Planned |
+|---|---|
+| APIs, VPC, subnet with GKE secondary ranges, Cloud NAT, IAP firewall | Bastion and its Ansible playbook |
+| Node service account with minimal roles | Human group role bindings |
+| Regional private GKE cluster, prod and staging node pools | Workload Identity bindings |
+| Buckets and secrets for both environments | Strimzi, Kafka topics, Kafka Connect to GCS |
+| BigQuery dataset `tweets_prod` | Collector `CronJob`, Prometheus and alert routing |
+| Three separated Terraform states | `NetworkPolicy`, `ResourceQuota`, scheduled scale-down, CI/CD |
 
 ## Conventions
 
 - Every resource goes through Terraform. A resource absent from the state does not exist.
-- Run `terraform fmt` before every commit.
+- `terraform fmt -recursive` before every commit.
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 - No secrets in the repository: no `.env`, no `.tfvars` values, no service account key file.
+- Plans are read in full before being applied; `-out=tfplan` guarantees that what was
+  reviewed is what is applied.

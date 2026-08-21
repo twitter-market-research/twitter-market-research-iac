@@ -21,4 +21,3 @@ variable "machine_type" {
   type        = string
   default     = "e2-standard-2"
 }
-
