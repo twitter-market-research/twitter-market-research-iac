@@ -18,7 +18,6 @@ This repository owns the **infrastructure** that constraint implies: a private,
 regional GKE cluster, an immutable raw storage layer, a warehouse for the KPIs, and
 identities designed so that no human ever holds the API token.
 
-> Epitech **Project 10** — *Étude de marché Twitter*.
 > Data platform: [twitter-market-research-dwh](https://github.com/twitter-market-research/twitter-market-research-dwh) ·
 > Dashboards: `twitter-market-research-dashboards`.
 > **Compose runs the stack on a laptop; Kubernetes runs it in production.**
@@ -354,5 +353,3 @@ can change without breaking downstream consumers.
   reviewed is what is applied.
 
 ---
-
-*Epitech · MSc Pro — Project 10 · Twitter Market Research.*
