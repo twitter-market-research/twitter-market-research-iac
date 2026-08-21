@@ -1,7 +1,7 @@
 resource "google_container_cluster" "main" {
   name     = "${var.name_prefix}-dwh"
   project  = var.project_id
-  location = var.region # ZONAL cluster  : control plane in 3 zones
+  location = var.region # regional cluster  : control plane in 3 zones
 
   # we create oiur owns pools , versiones in the code
   remove_default_node_pool = true

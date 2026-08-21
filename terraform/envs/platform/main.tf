@@ -21,6 +21,14 @@ module "network" {
   depends_on = [google_project_service.required]
 }
 
+module "iam_nodes" {
+  source = "../../modules/iam-roles"
+
+  project_id = var.project_id
+
+  depends_on = [google_project_service.required]
+}
+
 module "gke" {
   source = "../../modules/gke"
 
