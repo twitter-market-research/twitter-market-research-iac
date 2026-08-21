@@ -1,15 +1,20 @@
 locals {
   node_pools = {
     prod = {
-      node_count = 1 # × 3 zones = 3 nœuds
-      taint      = true
+      node_count     = 1 # × 3 zones
+      node_locations = null
+      disk_size_gb   = 30
+      taint          = true
     }
     staging = {
-      node_count = 1
-      taint      = false
+      node_count     = 1
+      node_locations = ["europe-west1-b"] # une seule zone : pas de HA en staging
+      disk_size_gb   = 30
+      taint          = false
     }
   }
 }
+
 
 resource "google_container_node_pool" "main" {
   for_each = local.node_pools
@@ -20,11 +25,13 @@ resource "google_container_node_pool" "main" {
   location = var.region # regional cluster
 
   # On a regional cluster, this number is PER ZONE.
-  node_count = each.value.node_count
+    node_count     = each.value.node_count
+    node_locations = each.value.node_locations
 
   node_config {
     machine_type = var.node_machine_type
-    disk_size_gb = 50
+    disk_size_gb = each.value.disk_size_gb
+
     disk_type    = "pd-balanced"
 
     service_account = var.node_service_account
