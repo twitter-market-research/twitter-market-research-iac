@@ -1,6 +1,6 @@
 variable "project_id" { type = string }
-variable "zone"       { type = string }
-variable "subnet_id"  { type = string }
+variable "zone" { type = string }
+variable "subnet_id" { type = string }
 variable "name_prefix" {
   type    = string
   default = "twitter-mr"
