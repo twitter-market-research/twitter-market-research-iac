@@ -31,6 +31,7 @@ module "iam_nodes" {
 
 module "gke" {
   source = "../../modules/gke"
+  count = var.enable_gke ? 1 : 0
 
   project_id           = var.project_id
   region               = var.region
@@ -44,3 +45,4 @@ module "gke" {
     "vpc-subnet" = "10.10.0.0/24" # le bastion vit dans ce sous-réseau
   }
 }
+

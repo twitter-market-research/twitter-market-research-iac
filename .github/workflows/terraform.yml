@@ -1,0 +1,109 @@
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "github/workflows/terraform.yml"
+  
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".githib/workflows/terraform.yml"
+
+
+permissions:
+  contents: read
+  id-token: write # lets the job request a github OIDC token
+
+
+env:
+  TF_VERSION: "1.16.5"
+  WIF_PROVIDER: "projects/401322478923/locations/global/workloadIdentityPools/github/providers/github-actions"
+  PLAN_SA: "ci-terraform-plan@twitter-market-researsch.iam.gserviceaccount.com"
+  APPLY_SA: "ci-terraform-plan@twitter-market-research.iam.gserviceaccount.com"
+
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - run: terraform fmt -check -recursive terraform
+
+
+plan:
+  if: github.event_name == 'pull_request'
+  needs: fmt
+  runs-on: ubuntu-latest
+  strategy:
+    fail-fast: false
+    matrix:
+      root: [platform, prod]
+  defaults:
+    run:
+      working-directory: terraform/envs/${{ matrix.root }}
+  steps:
+    - uses: actions/checkout@v4
+    - uses: google-github-actions/auth@v2
+      with:
+        worload_identity_provider: ${{ env.WIF_PROVIDER }}
+        service_account: ${{ env.PLAN_SA }}
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+    - run: terraform init -input-false
+    - run: terraform validate
+    - run: terraform plan -input=false -lock=false
+
+apply-platform:
+  if: github.event_name == 'push'
+  needs: fmt
+  runs-on: ubuntu-latest
+  environment: production
+  concurrency: terraform-platform
+  defaults:
+    run:
+      working-directory: terraform/envs/platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.APPLY_SA }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - run: terraform init -input=false
+      - run: terraform plan -input=false -out=tfplan
+      - run: terraform apply -input=false tfplan
+
+
+apply-envs:
+  needs: apply-platform
+  runs-on: ubuntu-latest
+  environment: production
+  strategy:
+    fail-fast: false
+    matrix:
+      root: [prod]
+  concurrency: terraform-${{ matrix.root }}
+  defaults:
+    run:
+      working-directory: terraform/envs/${{ matrix.root }}
+  steps:
+    - uses: actions/checkout@v4
+    - uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ env.TF_VERSION }}
+        service_account: ${{ env.APPLY_SA }}
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+    - run: terraform init -input=false
+    - run: terraform plan -input=false -out=tfplan
+    - run: terraform apply -input=false tfplan

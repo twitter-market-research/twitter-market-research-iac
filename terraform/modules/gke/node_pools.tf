@@ -25,14 +25,14 @@ resource "google_container_node_pool" "main" {
   location = var.region # regional cluster
 
   # On a regional cluster, this number is PER ZONE.
-    node_count     = each.value.node_count
-    node_locations = each.value.node_locations
+  node_count     = each.value.node_count
+  node_locations = each.value.node_locations
 
   node_config {
     machine_type = var.node_machine_type
     disk_size_gb = each.value.disk_size_gb
 
-    disk_type    = "pd-balanced"
+    disk_type = "pd-balanced"
 
     service_account = var.node_service_account
     oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
