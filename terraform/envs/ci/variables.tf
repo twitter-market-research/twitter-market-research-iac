@@ -20,3 +20,12 @@ variable "state_bucket" {
   type        = string
   default     = "twitter-market-research-iac"
 }
+
+variable "image_repositories" {
+  description = "Regidtry name => Github repository (owner/name) allowed to push to it from main"
+  type        = map(string)
+  default = {
+    dwh   = "twitter-market-research/twitter-market-research-dwh"
+    dashboards = "twitter-market-research/twitter-market-research-dashboards"
+  }
+}

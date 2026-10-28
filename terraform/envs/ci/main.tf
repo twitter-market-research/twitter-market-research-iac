@@ -20,4 +20,6 @@ module "ci" {
   state_bucket      = var.state_bucket
 
   depends_on = [google_project_service.required]
+  image_repositories = var.image_repositories
 }
+
