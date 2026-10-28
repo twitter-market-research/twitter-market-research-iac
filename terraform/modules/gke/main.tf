@@ -6,7 +6,7 @@ resource "google_container_cluster" "main" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
-   node_config {
+  node_config {
     machine_type = "e2-small"
     disk_size_gb = 20
     disk_type    = "pd-balanced"
