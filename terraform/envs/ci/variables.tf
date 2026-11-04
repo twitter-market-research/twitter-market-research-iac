@@ -25,7 +25,7 @@ variable "image_repositories" {
   description = "Regidtry name => Github repository (owner/name) allowed to push to it from main"
   type        = map(string)
   default = {
-    dwh   = "twitter-market-research/twitter-market-research-dwh"
+    dwh        = "twitter-market-research/twitter-market-research-dwh"
     dashboards = "twitter-market-research/twitter-market-research-dashboards"
   }
 }

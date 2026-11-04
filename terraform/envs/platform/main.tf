@@ -6,10 +6,20 @@ resource "google_project_service" "required" {
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
     "bigquery.googleapis.com",
+    "artifactregistry.googleapis.com",
   ])
 
   service            = each.value
   disable_on_destroy = false
+}
+
+data "terraform_remote_state" "ci" {
+  backend = "gcs"
+
+  config = {
+    bucket = "twitter-market-research-iac"
+    prefix = "ci"
+  }
 }
 
 module "network" {
@@ -31,7 +41,7 @@ module "iam_nodes" {
 
 module "gke" {
   source = "../../modules/gke"
-  count = var.enable_gke ? 1 : 0
+  count  = var.enable_gke ? 1 : 0
 
   project_id           = var.project_id
   region               = var.region
@@ -44,5 +54,14 @@ module "gke" {
   authorized_networks = {
     "vpc-subnet" = "10.10.0.0/24" # le bastion vit dans ce sous-réseau
   }
+}
+
+module "registry" {
+  source = "../../modules/registry"
+
+  project_id = var.project_id
+  region     = var.region
+  writers    = data.terraform_remote_state.ci.outputs.image_pusher_service_accounts
+  depends_on = [google_project_service.required]
 }
 

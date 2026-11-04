@@ -27,7 +27,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   }
 
   # Only the repositories of this project may knock on the door.
-  attribute_condition = "assertion.repository in '${jsonencode(concat([var.github_repository], values(var.image_repositories)))}"
+  attribute_condition = "assertion.repository in ${jsonencode(concat([var.github_repository], values(var.image_repositories)))}"
 }
 
 # ---------- Identities ----------
@@ -123,14 +123,19 @@ resource "google_service_account" "image_pusher" {
   project      = var.project_id
   display_name = "CI image pusher (${each.key})"
   description  = "Pushes ${each.value} images from its main"
-  
+
 }
 
 # Only pushes on main may borrow the identity: : a pull request cannot publish an image
-resource "google_service_account_iam_member" "image_pusher_vif" {
+resource "google_service_account_iam_member" "image_pusher_wif" {
   for_each = var.image_repositories
-  
+
   service_account_id = google_service_account.image_pusher[each.key].name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${each.value}:ref:refs/heads/main"
+}
+
+moved {
+  from = google_service_account_iam_member.image_pusher_vif
+  to   = google_service_account_iam_member.image_pusher_wif
 }

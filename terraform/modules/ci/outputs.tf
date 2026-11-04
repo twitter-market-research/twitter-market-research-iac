@@ -15,5 +15,5 @@ output "apply_service_account" {
 
 output "image_pusher_service_accounts" {
   description = "Registry name => email of the identity allowed to push to it"
-  value       = {for k, sa in google_service_account.image_pusher : k => sa.email }
+  value       = { for k, sa in google_service_account.image_pusher : k => sa.email }
 }

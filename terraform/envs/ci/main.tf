@@ -19,7 +19,8 @@ module "ci" {
   github_repository = var.github_repository
   state_bucket      = var.state_bucket
 
-  depends_on = [google_project_service.required]
+  depends_on         = [google_project_service.required]
   image_repositories = var.image_repositories
 }
+
 
