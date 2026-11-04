@@ -18,3 +18,8 @@ variable "apply_environment" {
   type        = string
   default     = "production"
 }
+
+variable "image_repositories" {
+  description = "Regidtry name => Github repository (owner/name) allowed to push to it from main"
+  type        = map(string)
+}

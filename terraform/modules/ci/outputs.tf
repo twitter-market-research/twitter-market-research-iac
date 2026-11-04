@@ -12,3 +12,8 @@ output "apply_service_account" {
   description = "Email of the identity running terraform apply"
   value       = google_service_account.apply.email
 }
+
+output "image_pusher_service_accounts" {
+  description = "Registry name => email of the identity allowed to push to it"
+  value       = { for k, sa in google_service_account.image_pusher : k => sa.email }
+}

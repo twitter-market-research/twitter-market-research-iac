@@ -26,9 +26,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.ref"        = "assertion.ref"
   }
 
-  # Every GitHub repository can obtain a token from the same issuer:
-  # without this condition, any repository in the world could knock on the door.
-  attribute_condition = "assertion.repository == '${var.github_repository}'"
+  # Only the repositories of this project may knock on the door.
+  attribute_condition = "assertion.repository in ${jsonencode(concat([var.github_repository], values(var.image_repositories)))}"
 }
 
 # ---------- Identities ----------
@@ -91,6 +90,7 @@ resource "google_project_iam_member" "apply" {
     "roles/storage.admin",
     "roles/bigquery.dataOwner",
     "roles/secretmanager.admin",
+    "roles/artifactregistry.admin",
   ])
 
   project = var.project_id
@@ -111,4 +111,31 @@ resource "google_storage_bucket_iam_member" "state_apply" {
   bucket = var.state_bucket
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.apply.email}"
+}
+
+# --------------- Image pushers ------------
+# One idendtiy per image repository : dashboards cannot overwrite dwh images.
+
+resource "google_service_account" "image_pusher" {
+  for_each = var.image_repositories
+
+  account_id   = "ci-push-${each.key}"
+  project      = var.project_id
+  display_name = "CI image pusher (${each.key})"
+  description  = "Pushes ${each.value} images from its main"
+
+}
+
+# Only pushes on main may borrow the identity: : a pull request cannot publish an image
+resource "google_service_account_iam_member" "image_pusher_wif" {
+  for_each = var.image_repositories
+
+  service_account_id = google_service_account.image_pusher[each.key].name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/repo:${each.value}:ref:refs/heads/main"
+}
+
+moved {
+  from = google_service_account_iam_member.image_pusher_vif
+  to   = google_service_account_iam_member.image_pusher_wif
 }

@@ -12,3 +12,8 @@ output "apply_service_account" {
   description = "Service account used by terraform apply jobs"
   value       = module.ci.apply_service_account
 }
+
+output "image_pusher_service_accounts" {
+  description = "Registry name => email of the identity allowed to push to it"
+  value       = module.ci.image_pusher_service_accounts
+}
